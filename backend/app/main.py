@@ -9,7 +9,7 @@ from secrets import randbelow, token_urlsafe
 from typing import Any
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .storage import IntegrityEvent, Interview, Organization, Review, SessionToken, User, db_session, init_db
@@ -81,6 +81,7 @@ events: dict[str, list[dict[str, Any]]] = {}
 users: dict[str, dict[str, Any]] = {}
 pending_otps: dict[str, dict[str, Any]] = {}
 rate_limits: dict[str, list[datetime]] = {}
+room_connections: dict[str, set[WebSocket]] = {}
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -151,6 +152,21 @@ def current_session(authorization: str | None = Header(default=None)) -> dict[st
         if not user:
             raise HTTPException(status_code=401, detail="Session user no longer exists.")
         return {"user_id": session.user_id, "organization_id": session.organization_id, "role": user.role, "name": user.name, "email": user.email}
+
+def session_from_token(token: str | None) -> dict[str, str] | None:
+    if not token:
+        return None
+    try:
+        with db_session() as db:
+            session = db.get(SessionToken, token_digest(token))
+            if not session or session.expires_at < datetime.now(timezone.utc):
+                return None
+            user = db.get(User, session.user_id)
+            if not user:
+                return None
+            return {"user_id": session.user_id, "organization_id": session.organization_id, "role": user.role}
+    except Exception:
+        return None
 
 @app.get("/health")
 def health() -> dict[str, str]:
@@ -312,7 +328,33 @@ def add_event(interview_id: str, payload: IntegrityEventCreate, session: dict[st
     with db_session() as db:
         db.add(IntegrityEvent(id=event["id"], interview_id=interview_id, type=payload.type, timestamp=payload.timestamp, confidence=payload.confidence, severity=payload.severity, event_metadata=payload.metadata))
         db.commit()
+    for connection in list(room_connections.get(interview_id, set())):
+        try:
+            import asyncio
+            asyncio.create_task(connection.send_json({"kind": "integrity_event", "event": event}))
+        except Exception:
+            room_connections.get(interview_id, set()).discard(connection)
     return event
+
+@app.websocket("/ws/interviews/{interview_id}")
+async def interview_socket(websocket: WebSocket, interview_id: str, token: str | None = None) -> None:
+    session = session_from_token(token)
+    if not session:
+        await websocket.close(code=4401)
+        return
+    with db_session() as db:
+        interview = db.get(Interview, interview_id)
+        if not interview or interview.organization_id != session["organization_id"]:
+            await websocket.close(code=4404)
+            return
+    await websocket.accept()
+    room_connections.setdefault(interview_id, set()).add(websocket)
+    try:
+        await websocket.send_json({"kind": "room_connected", "interview_id": interview_id})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        room_connections.get(interview_id, set()).discard(websocket)
 
 @app.get("/api/v1/invitations/{invitation_token}")
 def read_invitation(invitation_token: str) -> dict[str, Any]:
