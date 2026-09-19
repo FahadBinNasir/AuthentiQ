@@ -352,7 +352,15 @@ async def interview_socket(websocket: WebSocket, interview_id: str, token: str |
     try:
         await websocket.send_json({"kind": "room_connected", "interview_id": interview_id})
         while True:
-            await websocket.receive_text()
+            message = await websocket.receive_json()
+            if message.get("kind") not in {"offer", "answer", "ice_candidate", "room_state"}:
+                continue
+            for connection in list(room_connections.get(interview_id, set())):
+                if connection is not websocket:
+                    try:
+                        await connection.send_json({"kind": message["kind"], "payload": message.get("payload")})
+                    except Exception:
+                        room_connections.get(interview_id, set()).discard(connection)
     except WebSocketDisconnect:
         room_connections.get(interview_id, set()).discard(websocket)
 
