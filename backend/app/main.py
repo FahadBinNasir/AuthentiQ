@@ -73,6 +73,9 @@ class ReviewUpdate(BaseModel):
     decision: str = Field(pattern="^(pending|clear|needs_review|escalated)$")
     notes: str | None = Field(default=None, max_length=5000)
 
+class RoleUpdate(BaseModel):
+    role: str = Field(pattern="^(admin|interviewer|reviewer)$")
+
 interviews: dict[str, dict[str, Any]] = {}
 events: dict[str, list[dict[str, Any]]] = {}
 users: dict[str, dict[str, Any]] = {}
@@ -144,7 +147,10 @@ def current_session(authorization: str | None = Header(default=None)) -> dict[st
         session = db.get(SessionToken, token_digest(authorization.split(" ", 1)[1]))
         if not session or session.expires_at < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="Your session has expired. Please log in again.")
-        return {"user_id": session.user_id, "organization_id": session.organization_id}
+        user = db.get(User, session.user_id)
+        if not user:
+            raise HTTPException(status_code=401, detail="Session user no longer exists.")
+        return {"user_id": session.user_id, "organization_id": session.organization_id, "role": user.role, "name": user.name, "email": user.email}
 
 @app.get("/health")
 def health() -> dict[str, str]:
@@ -235,6 +241,28 @@ def logout(authorization: str | None = Header(default=None)) -> dict[str, str]:
                 db.delete(session)
                 db.commit()
     return {"status": "logged_out"}
+
+@app.get("/api/v1/auth/me")
+def auth_me(session: dict[str, str] = Depends(current_session)) -> dict[str, str]:
+    return session
+
+@app.get("/api/v1/organization/members")
+def organization_members(session: dict[str, str] = Depends(current_session)) -> list[dict[str, str]]:
+    with db_session() as db:
+        rows = db.query(User).filter(User.organization == session["organization_id"]).order_by(User.created_at).all()
+        return [{"id": row.id, "name": row.name, "email": row.email, "role": row.role, "verified": str(row.verified).lower()} for row in rows]
+
+@app.patch("/api/v1/organization/members/{user_id}/role")
+def update_member_role(user_id: str, payload: RoleUpdate, session: dict[str, str] = Depends(current_session)) -> dict[str, str]:
+    if session["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only organization admins can change roles.")
+    with db_session() as db:
+        user = db.get(User, user_id)
+        if not user or user.organization != session["organization_id"]:
+            raise HTTPException(status_code=404, detail="Organization member not found.")
+        user.role = payload.role
+        db.commit()
+        return {"id": user.id, "email": user.email, "role": user.role}
 
 @app.post("/api/v1/interviews", status_code=201)
 def create_interview(payload: InterviewCreate, session: dict[str, str] = Depends(current_session)) -> dict[str, Any]:
