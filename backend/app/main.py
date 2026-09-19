@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from hashlib import pbkdf2_hmac
+from hashlib import pbkdf2_hmac, sha256
 from hmac import compare_digest
 import os
 import smtplib
@@ -9,10 +9,10 @@ from secrets import randbelow, token_urlsafe
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from .storage import IntegrityEvent, Interview, User, db_session, init_db
+from .storage import IntegrityEvent, Interview, Organization, SessionToken, User, db_session, init_db
 
 app = FastAPI(title="AuthentiQ API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -63,6 +63,11 @@ class LoginRequest(BaseModel):
 class OTPRequest(BaseModel):
     email: str
     otp: str = Field(min_length=6, max_length=6)
+
+class SessionResponse(BaseModel):
+    session_token: str
+    user_id: str
+    organization_id: str
 
 interviews: dict[str, dict[str, Any]] = {}
 events: dict[str, list[dict[str, Any]]] = {}
@@ -118,6 +123,25 @@ def issue_otp(email: str, purpose: str) -> None:
     pending_otps[email] = {"hash": password_hash(code), "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10), "purpose": purpose, "attempts": 0}
     send_otp(email, code, purpose)
 
+def token_digest(token: str) -> str:
+    return sha256(token.encode()).hexdigest()
+
+def create_session(user_id: str, organization_id: str) -> str:
+    raw = token_urlsafe(48)
+    with db_session() as db:
+        db.add(SessionToken(token_hash=token_digest(raw), user_id=user_id, organization_id=organization_id, expires_at=datetime.now(timezone.utc) + timedelta(days=7)))
+        db.commit()
+    return raw
+
+def current_session(authorization: str | None = Header(default=None)) -> dict[str, str]:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    with db_session() as db:
+        session = db.get(SessionToken, token_digest(authorization.split(" ", 1)[1]))
+        if not session or session.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="Your session has expired. Please log in again.")
+        return {"user_id": session.user_id, "organization_id": session.organization_id}
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "authentiq-api"}
@@ -133,7 +157,9 @@ def signup_request_otp(payload: SignupRequest, request: Request) -> dict[str, st
     record = {"id": f"usr_{uuid4().hex[:10]}", "name": payload.name, "organization": payload.organization, "email": email, "password_hash": password_hash(payload.password), "verified": False, "created_at": now()}
     users[email] = record
     with db_session() as db:
-        db.add(User(**{**record, "created_at": datetime.now(timezone.utc)}))
+        organization = Organization(id=f"org_{uuid4().hex[:10]}", name=payload.organization)
+        db.add(organization)
+        db.add(User(**{**record, "organization": organization.id, "created_at": datetime.now(timezone.utc)}))
         db.commit()
     issue_otp(email, "signup")
     return {"status": "otp_sent", "message": "A verification code has been sent to your email."}
@@ -189,10 +215,26 @@ def login_verify(payload: OTPRequest) -> dict[str, str]:
     if record["attempts"] > 5 or not password_matches(payload.otp, record["hash"]):
         raise HTTPException(status_code=400, detail="This login code is invalid.")
     pending_otps.pop(email, None)
-    return {"status": "authenticated", "session_token": token_urlsafe(48), "message": "Login successful."}
+    with db_session() as db:
+        stored = db.query(User).filter(User.email == email).first()
+        if not stored:
+            raise HTTPException(status_code=401, detail="Account not found.")
+        session = create_session(stored.id, stored.organization)
+    return {"status": "authenticated", "session_token": session, "message": "Login successful."}
+
+@app.post("/api/v1/auth/logout")
+def logout(authorization: str | None = Header(default=None)) -> dict[str, str]:
+    if authorization and authorization.lower().startswith("bearer "):
+        with db_session() as db:
+            session = db.get(SessionToken, token_digest(authorization.split(" ", 1)[1]))
+            if session:
+                db.delete(session)
+                db.commit()
+    return {"status": "logged_out"}
 
 @app.post("/api/v1/interviews", status_code=201)
-def create_interview(payload: InterviewCreate, x_organization_id: str = Header(default="demo-organization")) -> dict[str, Any]:
+def create_interview(payload: InterviewCreate, session: dict[str, str] = Depends(current_session)) -> dict[str, Any]:
+    x_organization_id = session["organization_id"]
     interview_id = f"int_{uuid4().hex[:10]}"
     record = {"id": interview_id, "organization_id": x_organization_id, "status": InterviewStatus.scheduled, "created_at": now(), "invitation_token": token_urlsafe(32), "room_name": f"room_{interview_id}", **payload.model_dump(mode="json")}
     with db_session() as db:
@@ -203,24 +245,26 @@ def create_interview(payload: InterviewCreate, x_organization_id: str = Header(d
     return record
 
 @app.get("/api/v1/interviews")
-def list_interviews(x_organization_id: str = Header(default="demo-organization")) -> list[dict[str, Any]]:
+def list_interviews(session: dict[str, str] = Depends(current_session)) -> list[dict[str, Any]]:
+    x_organization_id = session["organization_id"]
     with db_session() as db:
         rows = db.query(Interview).filter(Interview.organization_id == x_organization_id).order_by(Interview.scheduled_at).all()
         return [{"id": row.id, "organization_id": row.organization_id, "candidate_name": row.candidate_name, "candidate_email": row.candidate_email, "title": row.title, "description": row.description, "scheduled_at": row.scheduled_at.isoformat(), "duration_minutes": row.duration_minutes, "status": row.status, "monitoring": row.monitoring, "invitation_token": row.invitation_token, "room_name": row.room_name, "created_at": row.created_at.isoformat()} for row in rows]
 
 @app.get("/api/v1/interviews/{interview_id}")
-def get_interview(interview_id: str) -> dict[str, Any]:
+def get_interview(interview_id: str, session: dict[str, str] = Depends(current_session)) -> dict[str, Any]:
     with db_session() as db:
         row = db.get(Interview, interview_id)
-        if not row:
+        if not row or row.organization_id != session["organization_id"]:
             raise HTTPException(status_code=404, detail="Interview not found")
         event_rows = db.query(IntegrityEvent).filter(IntegrityEvent.interview_id == interview_id).order_by(IntegrityEvent.timestamp).all()
         return {"id": row.id, "organization_id": row.organization_id, "candidate_name": row.candidate_name, "candidate_email": row.candidate_email, "title": row.title, "description": row.description, "scheduled_at": row.scheduled_at.isoformat(), "duration_minutes": row.duration_minutes, "status": row.status, "monitoring": row.monitoring, "invitation_token": row.invitation_token, "room_name": row.room_name, "events": [{"id": e.id, "interview_id": e.interview_id, "type": e.type, "timestamp": e.timestamp.isoformat(), "confidence": e.confidence, "severity": e.severity, "metadata": e.event_metadata, "created_at": e.created_at.isoformat()} for e in event_rows]}
 
 @app.post("/api/v1/interviews/{interview_id}/events", status_code=201)
-def add_event(interview_id: str, payload: IntegrityEventCreate) -> dict[str, Any]:
+def add_event(interview_id: str, payload: IntegrityEventCreate, session: dict[str, str] = Depends(current_session)) -> dict[str, Any]:
     with db_session() as db:
-        if not db.get(Interview, interview_id):
+        interview = db.get(Interview, interview_id)
+        if not interview or interview.organization_id != session["organization_id"]:
             raise HTTPException(status_code=404, detail="Interview not found")
     event = {"id": f"evt_{uuid4().hex[:10]}", "interview_id": interview_id, "created_at": now(), **payload.model_dump(mode="json")}
     with db_session() as db:
