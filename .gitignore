@@ -4,6 +4,8 @@ out/
 .env
 .env.local
 backend/.venv/
+backend/authentiq.local.db
+.env.local.backend
 __pycache__/
 *.py[cod]
 .DS_Store
