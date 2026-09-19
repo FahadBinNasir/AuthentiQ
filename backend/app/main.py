@@ -339,12 +339,13 @@ def add_event(interview_id: str, payload: IntegrityEventCreate, session: dict[st
 @app.websocket("/ws/interviews/{interview_id}")
 async def interview_socket(websocket: WebSocket, interview_id: str, token: str | None = None) -> None:
     session = session_from_token(token)
-    if not session:
-        await websocket.close(code=4401)
-        return
     with db_session() as db:
         interview = db.get(Interview, interview_id)
-        if not interview or interview.organization_id != session["organization_id"]:
+        candidate_access = bool(interview and token and interview.invitation_token == token)
+        if not session and not candidate_access:
+            await websocket.close(code=4401)
+            return
+        if not interview or (session and interview.organization_id != session["organization_id"]):
             await websocket.close(code=4404)
             return
     await websocket.accept()
