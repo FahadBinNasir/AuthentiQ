@@ -12,6 +12,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from .storage import IntegrityEvent, Interview, Organization, Review, SessionToken, User, db_session, init_db
 
 app = FastAPI(title="AuthentiQ API", version="0.1.0")
@@ -171,6 +172,20 @@ def session_from_token(token: str | None) -> dict[str, str] | None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "authentiq-api"}
+
+@app.get("/health/ready")
+def readiness() -> dict[str, Any]:
+    checks: dict[str, str] = {}
+    try:
+        with db_session() as db:
+            db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "error"
+    smtp_configured = all(os.getenv(name) for name in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"))
+    checks["smtp"] = "ok" if smtp_configured else "not_configured"
+    ready = checks["database"] == "ok" and (os.getenv("APP_ENV", "development") != "production" or smtp_configured)
+    return {"status": "ready" if ready else "not_ready", "checks": checks}
 
 @app.post("/api/v1/auth/signup/request-otp")
 def signup_request_otp(payload: SignupRequest, request: Request) -> dict[str, str]:

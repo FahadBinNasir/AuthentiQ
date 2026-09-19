@@ -1,10 +1,15 @@
 from fastapi import HTTPException
 
-from app.main import health, current_session, password_hash, password_matches, read_invitation
+from app.main import current_session, health, password_hash, password_matches, readiness, read_invitation
 
 
 def test_health_endpoint():
     assert health() == {"status": "ok", "service": "authentiq-api"}
+
+
+def test_readiness_reports_database():
+    result = readiness()
+    assert result["checks"]["database"] == "ok"
 
 
 def test_password_hash_is_not_plaintext():
