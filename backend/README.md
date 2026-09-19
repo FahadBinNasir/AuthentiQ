@@ -39,4 +39,6 @@ Copy the temporary `https://....trycloudflare.com` URL and set it in Vercel as `
 
 ## Authentication configuration
 
-In development, OTPs are printed in the API terminal. For real email delivery, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, and `APP_ENV=production`. OTPs expire after 10 minutes, verification is limited to five attempts, and requests are rate-limited per email and client IP.
+In development, OTPs are printed in the API terminal. For real email delivery, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `APP_ENV=production`. `SMTP_USERNAME` is accepted as a compatibility alias. OTPs expire after 10 minutes, verification is limited to five attempts, and requests are rate-limited per email and client IP. Never commit these values.
+
+Quick Tunnels are temporary. For a stable Vercel API URL, use `cloudflared/config.example.yml` with a Cloudflare-managed domain, then run `cloudflared tunnel run authentiq`. Set Vercel's `NEXT_PUBLIC_API_URL` to the published hostname.

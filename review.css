@@ -1,0 +1,1 @@
+.review-row{display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding:16px 0}.review-row>div{flex:1}.review-row strong,.review-row small{display:block}.review-row small{color:var(--muted);font-size:11px;margin-top:4px}.review-row button{cursor:pointer}
