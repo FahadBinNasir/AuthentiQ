@@ -69,6 +69,17 @@ class IntegrityEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class Review(Base):
+    __tablename__ = "reviews"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    interview_id: Mapped[str] = mapped_column(ForeignKey("interviews.id"), unique=True, index=True)
+    reviewer_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    decision: Mapped[str] = mapped_column(String(40), default="pending")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 def database_url() -> str:
     return os.getenv("DATABASE_URL", "sqlite:///./authentiq.local.db")
 

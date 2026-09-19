@@ -12,7 +12,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from .storage import IntegrityEvent, Interview, Organization, SessionToken, User, db_session, init_db
+from .storage import IntegrityEvent, Interview, Organization, Review, SessionToken, User, db_session, init_db
 
 app = FastAPI(title="AuthentiQ API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -68,6 +68,10 @@ class SessionResponse(BaseModel):
     session_token: str
     user_id: str
     organization_id: str
+
+class ReviewUpdate(BaseModel):
+    decision: str = Field(pattern="^(pending|clear|needs_review|escalated)$")
+    notes: str | None = Field(default=None, max_length=5000)
 
 interviews: dict[str, dict[str, Any]] = {}
 events: dict[str, list[dict[str, Any]]] = {}
@@ -300,3 +304,24 @@ def interview_report(interview_id: str, session: dict[str, str] = Depends(curren
         for row in rows:
             counts[row.severity] = counts.get(row.severity, 0) + 1
         return {"interview_id": interview.id, "candidate_name": interview.candidate_name, "title": interview.title, "status": interview.status, "summary": {"total_events": len(rows), "severity_counts": counts, "human_review_required": counts.get("critical", 0) > 0 or counts.get("warning", 0) > 0}, "timeline": [{"id": row.id, "type": row.type, "timestamp": row.timestamp.isoformat(), "confidence": row.confidence, "severity": row.severity, "metadata": row.event_metadata} for row in rows]}
+
+@app.put("/api/v1/interviews/{interview_id}/review")
+def update_review(interview_id: str, payload: ReviewUpdate, session: dict[str, str] = Depends(current_session)) -> dict[str, Any]:
+    with db_session() as db:
+        interview = db.get(Interview, interview_id)
+        if not interview or interview.organization_id != session["organization_id"]:
+            raise HTTPException(status_code=404, detail="Interview not found")
+        review = db.query(Review).filter(Review.interview_id == interview_id).first()
+        if not review:
+            review = Review(id=f"rev_{uuid4().hex[:10]}", interview_id=interview_id, reviewer_id=session["user_id"], decision=payload.decision, notes=payload.notes)
+            db.add(review)
+        else:
+            review.decision, review.notes, review.updated_at = payload.decision, payload.notes, datetime.now(timezone.utc)
+        db.commit()
+        return {"id": review.id, "interview_id": interview_id, "decision": review.decision, "notes": review.notes, "updated_at": review.updated_at.isoformat()}
+
+@app.get("/api/v1/reviews")
+def list_reviews(session: dict[str, str] = Depends(current_session)) -> list[dict[str, Any]]:
+    with db_session() as db:
+        rows = db.query(Review, Interview).join(Interview, Review.interview_id == Interview.id).filter(Interview.organization_id == session["organization_id"]).all()
+        return [{"id": review.id, "interview_id": review.interview_id, "candidate_name": interview.candidate_name, "title": interview.title, "decision": review.decision, "notes": review.notes, "updated_at": review.updated_at.isoformat()} for review, interview in rows]

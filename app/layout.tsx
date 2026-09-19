@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./overrides.css";
+import "./live.css";
 
 export const metadata: Metadata = {
   title: "AuthentiQ — Integrity workspace",
