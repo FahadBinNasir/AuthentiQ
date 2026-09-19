@@ -271,3 +271,32 @@ def add_event(interview_id: str, payload: IntegrityEventCreate, session: dict[st
         db.add(IntegrityEvent(id=event["id"], interview_id=interview_id, type=payload.type, timestamp=payload.timestamp, confidence=payload.confidence, severity=payload.severity, event_metadata=payload.metadata))
         db.commit()
     return event
+
+@app.get("/api/v1/invitations/{invitation_token}")
+def read_invitation(invitation_token: str) -> dict[str, Any]:
+    """Public candidate-facing invitation lookup; never exposes private signals."""
+    with db_session() as db:
+        row = db.query(Interview).filter(Interview.invitation_token == invitation_token).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Invitation not found or expired.")
+        return {"interview_id": row.id, "candidate_name": row.candidate_name, "title": row.title, "scheduled_at": row.scheduled_at.isoformat(), "duration_minutes": row.duration_minutes, "room_name": row.room_name, "status": row.status}
+
+@app.post("/api/v1/invitations/{invitation_token}/accept")
+def accept_invitation(invitation_token: str) -> dict[str, str]:
+    with db_session() as db:
+        row = db.query(Interview).filter(Interview.invitation_token == invitation_token).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Invitation not found or expired.")
+        return {"status": "accepted", "interview_id": row.id, "room_name": row.room_name}
+
+@app.get("/api/v1/interviews/{interview_id}/report")
+def interview_report(interview_id: str, session: dict[str, str] = Depends(current_session)) -> dict[str, Any]:
+    with db_session() as db:
+        interview = db.get(Interview, interview_id)
+        if not interview or interview.organization_id != session["organization_id"]:
+            raise HTTPException(status_code=404, detail="Interview not found")
+        rows = db.query(IntegrityEvent).filter(IntegrityEvent.interview_id == interview_id).order_by(IntegrityEvent.timestamp).all()
+        counts = {"informational": 0, "warning": 0, "critical": 0}
+        for row in rows:
+            counts[row.severity] = counts.get(row.severity, 0) + 1
+        return {"interview_id": interview.id, "candidate_name": interview.candidate_name, "title": interview.title, "status": interview.status, "summary": {"total_events": len(rows), "severity_counts": counts, "human_review_required": counts.get("critical", 0) > 0 or counts.get("warning", 0) > 0}, "timeline": [{"id": row.id, "type": row.type, "timestamp": row.timestamp.isoformat(), "confidence": row.confidence, "severity": row.severity, "metadata": row.event_metadata} for row in rows]}
