@@ -1,10 +1,9 @@
-const candidates = [
-  ["AR", "Ayesha Rahman", "Senior Product Designer", "3 interviews", "Verified"],
-  ["MK", "Mikael Khan", "Backend Engineer", "1 interview", "Invited"],
-  ["SN", "Sara Noor", "Frontend Intern", "2 interviews", "Needs review"],
-  ["HA", "Hamza Ali", "Software Engineer", "4 interviews", "Verified"],
-];
-
+"use client";
+import { useEffect, useState } from "react";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+type Candidate = { email: string; name: string; interviews: number; latest_status: string; latest_interview_id: string };
 export default function CandidatesPage() {
-  return <main className="simple-page"><a className="back-link" href="/">← Back to overview</a><p className="eyebrow red">WORKSPACE / CANDIDATES</p><h1>Candidates</h1><p className="page-intro">A clear view of candidate verification history and interview activity.</p><div className="candidate-page-card"><div className="candidate-page-head"><div><p className="eyebrow">96 TOTAL CANDIDATES</p><h2>Candidate directory</h2></div><a className="primary-button" href="/interviews/new">＋ New interview</a></div><div className="candidate-table">{candidates.map(([initials, name, role, interviews, status]) => <a className="simple-row" href="/reports" key={name}><span className="candidate-avatar">{initials}</span><span><strong>{name}</strong><small>{role}</small></span><time>{interviews}</time><em className={status === "Verified" ? "verified" : status === "Needs review" ? "needs-review" : "invited"}>{status}</em><span>↗</span></a>)}</div></div></main>;
+  const [candidates, setCandidates] = useState<Candidate[]>([]); const [error, setError] = useState("");
+  useEffect(() => { fetch(`${API}/api/v1/candidates`, { headers: { Authorization: `Bearer ${localStorage.getItem("authentiq_session") ?? ""}` } }).then(async (r) => { const d = await r.json(); if (!r.ok) throw Error(d.detail); setCandidates(d); }).catch((e) => setError(e.message)); }, []);
+  return <main className="simple-page"><a className="back-link" href="/dashboard">← Back to overview</a><p className="eyebrow red">WORKSPACE / CANDIDATES</p><h1>Candidates</h1><p className="page-intro">A live view of candidate interview activity from your workspace.</p>{error ? <div className="auth-error">{error}</div> : <div className="candidate-page-card"><div className="candidate-page-head"><div><p className="eyebrow">{candidates.length} CANDIDATES</p><h2>Candidate directory</h2></div><a className="primary-button" href="/interviews/new">＋ New interview</a></div><div className="candidate-table">{candidates.length === 0 ? <div className="data-state">No candidates yet. Create an interview to populate this directory.</div> : candidates.map((candidate) => <a className="simple-row" href={`/reports?id=${candidate.latest_interview_id}`} key={candidate.email}><span className="candidate-avatar">{candidate.name.slice(0, 2).toUpperCase()}</span><span><strong>{candidate.name}</strong><small>{candidate.email}</small></span><time>{candidate.interviews} interview{candidate.interviews === 1 ? "" : "s"}</time><em>{candidate.latest_status}</em><span>↗</span></a>)}</div></div>}</main>;
 }

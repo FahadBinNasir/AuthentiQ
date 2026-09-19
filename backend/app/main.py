@@ -255,6 +255,16 @@ def list_interviews(session: dict[str, str] = Depends(current_session)) -> list[
         rows = db.query(Interview).filter(Interview.organization_id == x_organization_id).order_by(Interview.scheduled_at).all()
         return [{"id": row.id, "organization_id": row.organization_id, "candidate_name": row.candidate_name, "candidate_email": row.candidate_email, "title": row.title, "description": row.description, "scheduled_at": row.scheduled_at.isoformat(), "duration_minutes": row.duration_minutes, "status": row.status, "monitoring": row.monitoring, "invitation_token": row.invitation_token, "room_name": row.room_name, "created_at": row.created_at.isoformat()} for row in rows]
 
+@app.get("/api/v1/candidates")
+def list_candidates(session: dict[str, str] = Depends(current_session)) -> list[dict[str, Any]]:
+    with db_session() as db:
+        rows = db.query(Interview).filter(Interview.organization_id == session["organization_id"]).order_by(Interview.created_at.desc()).all()
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            candidate = grouped.setdefault(row.candidate_email, {"email": row.candidate_email, "name": row.candidate_name, "interviews": 0, "latest_status": row.status, "latest_interview_id": row.id})
+            candidate["interviews"] += 1
+        return list(grouped.values())
+
 @app.get("/api/v1/interviews/{interview_id}")
 def get_interview(interview_id: str, session: dict[str, str] = Depends(current_session)) -> dict[str, Any]:
     with db_session() as db:
