@@ -1,0 +1,10 @@
+# Stable Named Tunnel configuration.
+# Replace the values below after creating a tunnel with:
+# cloudflared tunnel create authentiq
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /home/YOUR_USER/.cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: api.your-domain.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404
