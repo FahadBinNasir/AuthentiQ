@@ -19,7 +19,7 @@ new_sqlite_classes = ["InterviewRoom"]
 [vars]
 APP_ENV = "production"
 FRONTEND_ORIGIN = "https://authentiq-integrity.vercel.app"
-AUTH_EMAIL_FROM = "replace-after-domain-setup@example.com"
+BREVO_FROM_EMAIL = "ukb.notifications@gmail.com"
 
 # Add the Email Service binding after onboarding a sending domain.
 # [[send_email]]

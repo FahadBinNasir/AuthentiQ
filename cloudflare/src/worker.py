@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from workers import asgi, DurableObject, Response
-from js import crypto
+from js import crypto, fetch
 from pyodide.ffi import to_js
 
 app=FastAPI(title='AuthentiQ Cloudflare API',version='0.2.0')
@@ -41,9 +41,10 @@ async def current(r,authorization:str|None=Header(default=None)):
  if not x: raise HTTPException(401,'Your session has expired. Please log in again.')
  return x
 async def send_code(r,address,code,purpose):
- b=getattr(env(r),'EMAIL',None)
- if not b: raise HTTPException(503,'Cloudflare Email Service is not configured.')
- await b.send({'from':getattr(env(r),'AUTH_EMAIL_FROM','no-reply@example.com'),'to':address,'subject':f'Your AuthentiQ {purpose} code','text':f'Your AuthentiQ verification code is {code}. It expires in 10 minutes.'})
+ key=getattr(env(r),'BREVO_API_KEY',None)
+ if not key: raise HTTPException(503,'Transactional email is not configured.')
+ response=await fetch('https://api.brevo.com/v3/smtp/email',{'method':'POST','headers':to_js({'accept':'application/json','api-key':key,'content-type':'application/json'},dict_converter='js'),'body':json.dumps({'sender':{'email':getattr(env(r),'BREVO_FROM_EMAIL','ukb.notifications@gmail.com'),'name':'AuthentiQ'},'to':[{'email':address}],'subject':f'Your AuthentiQ {purpose} code','textContent':f'Your AuthentiQ verification code is {code}. It expires in 10 minutes.'})})
+ if not response.ok: raise HTTPException(503,'Email provider could not deliver the verification code.')
 @app.get('/health')
 async def health(): return {'status':'ok','service':'authentiq-api'}
 @app.get('/health/ready')
@@ -57,7 +58,7 @@ async def signup(r,b:Signup):
  if await one(r,'SELECT id FROM users WHERE email=?',e): raise HTTPException(409,'An account with this email already exists.')
  org=uid('org'); u=uid('usr'); code=f'{randbelow(1000000):06d}'
  await run(r,'INSERT INTO organizations(id,name,created_at) VALUES(?,?,?)',org,b.organization,now())
- await run(r,"INSERT INTO users(id,organization_id,email,name,password_hash,verified,role,created_at) VALUES(?,?,?,?,?,0,'admin',?)",u,org,e,b.name,phash(b.password),now())
+ await run(r,"INSERT INTO users(id,organization_id,email,name,password_hash,verified,role,created_at) VALUES(?,?,?,?,?,0,'admin',?)",u,org,e,b.name,await phash(b.password),now())
  await run(r,'INSERT OR REPLACE INTO otp_codes VALUES(?,?,?,?,0)',e,await phash(code),'signup',(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()); await send_code(r,e,code,'signup')
  return {'status':'otp_sent','message':'A verification code has been sent to your email.'}
 @app.post('/api/v1/auth/signup/verify')
