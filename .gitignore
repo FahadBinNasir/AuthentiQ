@@ -1,5 +1,10 @@
 node_modules/
 .next/
+.open-next/
+.wrangler/
+cloudflare/python_modules/
+cloudflare/.venv-workers/
+pylock.toml
 out/
 .env
 .env.local

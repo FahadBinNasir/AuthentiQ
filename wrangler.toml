@@ -1,4 +1,4 @@
-name = "authentiq-frontend"
+name = "app"
 main = ".open-next/worker.js"
 compatibility_date = "2026-09-19"
 compatibility_flags = ["nodejs_compat"]
