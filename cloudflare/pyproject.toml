@@ -1,0 +1,9 @@
+[project]
+name = "authentiq-cloudflare-api"
+version = "0.1.0"
+description = "Cloudflare Python Worker API for AuthentiQ"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.115,<1"]
+
+[dependency-groups]
+dev = ["workers-py", "workers-runtime-sdk"]

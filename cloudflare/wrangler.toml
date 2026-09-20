@@ -1,0 +1,27 @@
+name = "authentiq-api"
+main = "src/worker.py"
+compatibility_date = "2026-09-19"
+compatibility_flags = ["python_workers"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "authentiq"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "InterviewRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["InterviewRoom"]
+
+[vars]
+APP_ENV = "production"
+FRONTEND_ORIGIN = "https://authentiq-integrity.vercel.app"
+AUTH_EMAIL_FROM = "replace-after-domain-setup@example.com"
+
+# Add the Email Service binding after onboarding a sending domain.
+# [[send_email]]
+# name = "EMAIL"
+# destination_address = "replace-with-your-verified-recipient@example.com"
