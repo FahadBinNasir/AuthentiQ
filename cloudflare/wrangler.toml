@@ -6,7 +6,7 @@ compatibility_flags = ["python_workers"]
 [[d1_databases]]
 binding = "DB"
 database_name = "authentiq"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "068d964a-5a58-4dcd-a6c4-71569c59a92d"
 
 [[durable_objects.bindings]]
 name = "ROOMS"

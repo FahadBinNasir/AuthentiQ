@@ -6,6 +6,14 @@ CREATE TABLE IF NOT EXISTS organizations (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS otp_codes (
+  email TEXT PRIMARY KEY,
+  code_hash TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL REFERENCES organizations(id),
